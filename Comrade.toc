@@ -1,6 +1,6 @@
 ## Interface: 20501
 ## Title: Comrade
-## Version: 1.0
+## Version: 1.0.1
 ## Author: Ron Krepps
 ## Notes: Track tradeskill cooldowns and share them with your guild and friends
 ## SavedVariables: comrade_Config

@@ -11,23 +11,13 @@ local comrade_cooldownGroupAlchemy = 1
 local comrade_cooldownGroupTailoring = 2
 local comrade_cooldownGroupJewelcrafting = 3
 local comrade_cooldownGroupSaltshaker = 4
-local comrade_cooldownGroupTest = 5
+local comrade_cooldownGroupTailoring_PrimalMooncloth = 5
+local comrade_cooldownGroupTailoring_Spellcloth = 6
+local comrade_cooldownGroupTailoring_Shadowcloth = 7
 
 local comrade_iconWidth = 24
 local comrade_iconHeight = 24
 local comrade_iconSpacing = 12
-
--- Test
--- tradeSkillSpellData["30823"] =
--- {
-	-- Expansion = comrade_expansionBc,
-	-- SpellId = "30823",
-	-- Name = "Shamanistic Rage",
-	-- CooldownTimeInMinutes = 2,
-	-- CooldownTimeInMinutesBC = 2,
-	-- CooldownGroup = comrade_cooldownGroupTest,
-	-- Icon = "Interface\\Icons\\spell_nature_shamanrage"
--- }
 
 -- Classic
 tradeSkillSpellData["11479"] =
@@ -194,8 +184,8 @@ tradeSkillSpellData["26751"] =
 	SpellId = "26751",
 	Name = "Primal Mooncloth",
 	CooldownTimeInMinutes = 5520,
-	CooldownTimeInMinutesBC = 5520, --TODO: ???
-	CooldownGroup = comrade_cooldownGroupTailoring, -- TODO
+	CooldownTimeInMinutesBC = 5520,
+	CooldownGroup = comrade_cooldownGroupTailoring_PrimalMooncloth,
 	Icon = "Interface\\Icons\\inv_fabric_moonrag_primal"
 }
 
@@ -304,8 +294,8 @@ tradeSkillSpellData["31373"] =
 	SpellId = "31373",
 	Name = "Spellcloth",
 	CooldownTimeInMinutes = 5520,
-	CooldownTimeInMinutesBC = 5520, --TODO: Confirm
-	CooldownGroup = comrade_cooldownGroupTailoring, -- TODO
+	CooldownTimeInMinutesBC = 5520,
+	CooldownGroup = comrade_cooldownGroupTailoring_Spellcloth,
 	Icon = "Interface\\Icons\\inv_fabric_spellfire"
 }
 
@@ -337,8 +327,8 @@ tradeSkillSpellData["36686"] =
 	SpellId = "36686",
 	Name = "Shadowcloth",
 	CooldownTimeInMinutes = 5520,
-	CooldownTimeInMinutesBC = 5520, --TODO: Confirm
-	CooldownGroup = comrade_cooldownGroupTailoring, -- TODO
+	CooldownTimeInMinutesBC = 5520,
+	CooldownGroup = comrade_cooldownGroupTailoring_Shadowcloth,
 	Icon = "Interface\\Icons\\inv_fabric_felcloth_ebon"
 }
 
@@ -536,17 +526,17 @@ function comrade:UNIT_SPELLCAST_SUCCEEDED(event, unit, GUID, spellId)
 							_c.Spells[v2.SpellId].cooldownDuration = cooldownInSeconds
 						end
 					end
-				end
-				
-				-- Send a message to guild
-				SendChatMessage(string.format("[Comrade] %s just used %s. Next cooldown available in %s", playerName, v.Name, ConvertTimeInSecondsToString(cooldownInSeconds)), "guild")
-				
-				--Send the character update to the comms
-				comrade:SendCommMessage(comrade_prefix, "UPDATE|"..comrade:Serialize(character), "GUILD", "")
-				
-				-- if the frame is open and the spell is selected update the table immediately
-				if _frameCreated and _frame:IsShown() and comrade_Config.options.selectedSpellId == tostring(spellId) then
-					UpdateTableData()
+					
+					-- Send a message to guild
+					SendChatMessage(string.format("[Comrade] %s just used %s. Next cooldown available in %s", playerName, v.Name, ConvertTimeInSecondsToString(cooldownInSeconds)), "guild")
+					
+					--Send the character update to the comms
+					comrade:SendCommMessage(comrade_prefix, "UPDATE|"..comrade:Serialize(comrade_Config.Characters[playerName]), "GUILD", "")
+					
+					-- if the frame is open and the spell is selected update the table immediately
+					if _frameCreated and _frame:IsShown() and comrade_Config.options.selectedSpellId == tostring(spellId) then
+						UpdateTableData()
+					end
 				end
 			end
 		end
@@ -723,11 +713,22 @@ function SetupMainWindow()
 						text = v.Name,
 						icon = v.Icon }
 
-		if v.Expansion == comrade_expansionClassic then
-			table.insert(_tree[comrade_expansionClassic].children, child)
-		elseif v.Expansion == comrade_expansionBc then
-			table.insert(_tree[comrade_expansionBc].children, child)
+		local cooldownInSeconds
+				
+		if game_version == "2.5.1" then
+			cooldownInSeconds = v.CooldownTimeInMinutesBC
+		else
+			cooldownInSeconds = v.CooldownTimeInMinutes
 		end
+		
+		-- Only add spells that have a cooldown. some spells lose cooldowns in BC
+		if cooldownInSeconds > 0 then
+			if v.Expansion == comrade_expansionClassic then
+				table.insert(_tree[comrade_expansionClassic].children, child)
+			elseif v.Expansion == comrade_expansionBc then
+				table.insert(_tree[comrade_expansionBc].children, child)
+			end
+		end		
 	end	
 
 	_treeFrame = AceGUI:Create("TreeGroup")
@@ -882,14 +883,10 @@ function UpdateContentFrame()
 	end
 
 	-- Only update the frame if there are characters and a spell is selected
-	if count == 0 or comrade_Config.options.selectedSpellId == "" then
-		--_contentFrameLabel:SetText("There are no entries in the database!")
-		--_contentFrameLabel.frame:Show()
-		--_contentFrame.frame:Hide()
-	else
+	if count > 0 and comrade_Config.options.selectedSpellId ~= "" then
 		_contentHeaderFrame:ReleaseChildren()
 		
-		local label = AceGUI:Create("Label")
+		local label = AceGUI:Create("Label")		
 		label:SetText(tradeSkillSpellData[comrade_Config.options.selectedSpellId].Name)
 		label:SetImage(tradeSkillSpellData[comrade_Config.options.selectedSpellId].Icon)
 		label:SetFont(GameFontHighlightSmall:GetFont(), 20)
@@ -897,10 +894,7 @@ function UpdateContentFrame()
 		label:SetRelativeWidth(0.9)
 		_contentHeaderFrame:AddChild(label)
 
-		--_contentFrameLabel.frame:Hide();
 		UpdateTableData();
-		--_contentFrameTable.frame:Show()
-		--_contentFrame.frame:Show()
 	end
 end
 

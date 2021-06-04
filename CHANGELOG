@@ -1,2 +1,4 @@
-1.0
+1.0.1
+Separate BC tailoring Primal Mooncloth, Spellfire, and Shadowcloth cooldowns so they are not grouped together.
+1.0.0
 Initial release
