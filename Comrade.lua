@@ -344,12 +344,15 @@ tradeSkillSpellData["47280"] =
 }
 
 -- locals
-local comrade_version = "1.0"
+local comrade_version = "1.1.0"
 local comrade_prefix = "comrade_data"
 local game_version = ""
 local playerName
+local _tableColumns
+local _cooldownFrameSelected = true
 
 -- ui vars
+local _tabGroup
 local _frameCreated = false
 local _frame
 local _treeFrame
@@ -358,6 +361,9 @@ local _contentFrame
 local _contentFrameLabel
 local _contentFrameTable
 local _tree
+
+local _optionFrame
+local _cooldownFrame
 
 -- config defaults
 local frameDefaultHeight = 400
@@ -383,9 +389,13 @@ function comrade:OnEnable()
 		{
 			height = frameDefaultHeight,
 			width = frameDefaultWidth,
+			selectedSpellId = "",
+			selectedTreeValue = "",
 			options  = {
-				selectedSpellId = "",
-				selectedTreeValue = "",
+				announceCooldownsToGuild = false,
+				trackedCharacters
+				{
+				},					
 			},
 			Characters = {},
 		}
@@ -403,15 +413,29 @@ function comrade:OnEnable()
 		comrade_Config.width = frameDefaultWidth
 	end
 	
-	if not comrade_Config.options.selectedSpellId then
-		 comrade_Config.options.selectedSpellId = ""
+	if not comrade_Config.selectedSpellId then
+		 comrade_Config.selectedSpellId = ""
 	end
 	
-	if not comrade_Config.options.selectedTreeValue then
-		 comrade_Config.options.selectedTreeValue = ""
+	if not comrade_Config.selectedTreeValue then
+		 comrade_Config.selectedTreeValue = ""
+	end
+	
+	if not comrade_Config.options then
+		 comrade_Config.options = { }
+	end
+	
+	if not comrade_Config.options.announceCooldownsToGuild then
+		 comrade_Config.options.announceCooldownsToGuild = false
+	end
+	
+	if not comrade_Config.options.trackedCharacters then
+		 comrade_Config.options.trackedCharacters = { }
 	end
 	
 	playerName = UnitName("player")
+	
+	SetupMainWindow()
 	
 	comrade:CheckForSpells()
 	comrade:CheckSpellCooldowns()
@@ -471,7 +495,7 @@ function comrade:CheckSpellCooldowns()
 	end
 
 	-- if the frame is open and the spell is selected update the table immediately
-	if _frameCreated and _frame:IsShown() and comrade_Config.options.selectedSpellId == tostring(spellId) then
+	if _frameCreated and _frame:IsShown() and comrade_Config.selectedSpellId == tostring(spellId) then
 		UpdateTableData()
 	end
 end
@@ -528,13 +552,15 @@ function comrade:UNIT_SPELLCAST_SUCCEEDED(event, unit, GUID, spellId)
 					end
 					
 					-- Send a message to guild
-					SendChatMessage(string.format("[Comrade] %s just used %s. Next cooldown available in %s", playerName, v.Name, ConvertTimeInSecondsToString(cooldownInSeconds)), "guild")
+					if comrade_Config.options.announceCooldownsToGuild then
+						SendChatMessage(string.format("[Comrade] %s just used %s. Next cooldown available in %s", playerName, v.Name, ConvertTimeInSecondsToString(cooldownInSeconds)), "guild")
+					end
 					
 					--Send the character update to the comms
 					comrade:SendCommMessage(comrade_prefix, "UPDATE|"..comrade:Serialize(comrade_Config.Characters[playerName]), "GUILD", "")
 					
 					-- if the frame is open and the spell is selected update the table immediately
-					if _frameCreated and _frame:IsShown() and comrade_Config.options.selectedSpellId == tostring(spellId) then
+					if _frameCreated and _frame:IsShown() and comrade_Config.selectedSpellId == tostring(spellId) then
 						UpdateTableData()
 					end
 				end
@@ -608,7 +634,7 @@ function comrade:CheckForSpells()
 	end
 	
 	-- if the frame is open and the spell is selected update the table immediately
-	if _frameCreated and _frame:IsShown() and comrade_Config.options.selectedSpellId == tostring(spellId) then
+	if _frameCreated and _frame:IsShown() and comrade_Config.selectedSpellId == tostring(spellId) then
 		UpdateTableData()
 	end
 end
@@ -670,12 +696,17 @@ function ScanTradeskillWindow()
 	end
 	
 	-- if the frame is open and the spell is selected update the table immediately
-	if _frameCreated and _frame:IsShown() and comrade_Config.options.selectedSpellId == tostring(spellId) then
+	if _frameCreated and _frame:IsShown() and comrade_Config.selectedSpellId == tostring(spellId) then
 		UpdateTableData()
 	end
 end
 
 function SetupMainWindow()
+	-- _tabGroup = AceGUI:Create("TabGroup")
+	-- _tabGroup:SetTabs({{value = "Cooldowns", text = "Cooldowns"},
+			-- {value = "Options", text = "Options"}
+			-- })
+
 	_frame = AceGUI:Create("Frame")
 	_frame:SetTitle("  Comrade")	
 	_frame:SetHeight(comrade_Config.height)
@@ -693,6 +724,39 @@ function SetupMainWindow()
 	_frame.frame:SetMinResize(600, 400)
 	_frame.frame:SetFrameStrata("HIGH")
 	_frame:SetLayout("Flow")
+	
+	-- Hacking into the Ace3 frame to reduce the size of the statusbox, to allow us room for other buttons
+	local closebutton, statusbg, _, _, _, _, _ = _frame.content.obj.frame:GetChildren()
+	statusbg:ClearAllPoints()
+	statusbg:SetPoint("BOTTOMLEFT", 15, 15)     -- taken from AceGUIContainer-Frame.lua
+	statusbg:SetPoint("BOTTOMRIGHT", -300, 15)  -- taken from AceGUIContainer-Frame.lua, modified from -132
+	
+	-- Create survey button
+	local surveybutton = CreateFrame("Button", nil, _frame.content.obj.frame, "UIPanelButtonTemplate")
+	surveybutton:SetPoint("BOTTOMRIGHT", -216, 17)
+	surveybutton:SetFrameStrata("DIALOG")
+	surveybutton:SetHeight(20)
+	surveybutton:SetWidth(80)
+	surveybutton:SetText("Survey")
+	--if attunelocal_myguild == "" then surveybutton:Disable() end
+	surveybutton:SetScript("OnEnter", function() _frame:SetStatusText("Request updates on cooldowns from your guild members") end)
+	surveybutton:SetScript("OnLeave", function() _frame:SetStatusText("Version: "..comrade_version) end)
+	surveybutton:SetScript("OnClick", function()
+		comrade_SurveyGuild()
+	end)
+	
+	-- Create toggle button
+	local toggleButton = CreateFrame("Button", "ToggleButton", _frame.content.obj.frame, "UIPanelButtonTemplate")
+	toggleButton:SetPoint("BOTTOMRIGHT", -126, 17)
+	toggleButton:SetFrameStrata("DIALOG")
+	toggleButton:SetHeight(20)
+	toggleButton:SetWidth(80)
+	toggleButton:SetText("Options")
+	toggleButton:SetScript("OnEnter", function() _frame:SetStatusText("View options") end)
+	toggleButton:SetScript("OnLeave", function() _frame:SetStatusText("Version: "..comrade_version) end)
+	toggleButton:SetScript("OnClick", function()		
+		ChangeFrames()
+	end)
 	
 	_tree = {
 		{ 
@@ -729,49 +793,9 @@ function SetupMainWindow()
 				table.insert(_tree[comrade_expansionBc].children, child)
 			end
 		end		
-	end	
-
-	_treeFrame = AceGUI:Create("TreeGroup")
-	_treeFrame:SetTree(_tree)
-	_treeFrame:SetLayout("Fill")
-	_treeFrame:SetFullWidth(true)
-	_treeFrame:SetFullHeight(true)
-	_treeFrame:SetAutoAdjustHeight(false)
-	_frame:AddChild(_treeFrame)	
+	end
 	
-	_treeFrame:SetCallback("OnGroupSelected", function(container, event, group)
-		local st, le = string.find(group, "\001")
-		comrade_Config.options.selectedTreeValue = group
-		
-		if st ~= nil then -- not a group
-			local g = string.sub(group, st+1)
-			if g ~= "" then
-				SpellSelected(g)
-			end
-		end
-	end)
-	
-	--_contentFrameLabel = AceGUI:Create("Label")
-	--_contentFrameLabel:SetFullWidth(true)
-	--_frame:AddChild(_contentFrameLabel)
-	
-	_contentFrame = AceGUI:Create("SimpleGroup")
-	_contentFrame:SetFullWidth(true)
-	_contentFrame:SetFullHeight(true)
-	_contentFrame:SetLayout("Flow")
-			
-	_contentHeaderFrame = AceGUI:Create("SimpleGroup")
-	_contentHeaderFrame:SetFullWidth(true)
-	_contentHeaderFrame:SetLayout("Flow")
-	_contentFrame:AddChild(_contentHeaderFrame)
-	
-	local contentTableFrame = AceGUI:Create("SimpleGroup")
-	contentTableFrame:SetFullWidth(true)
-	contentTableFrame:SetFullHeight(true)
-	contentTableFrame:SetLayout("Flow")
-	_contentFrame:AddChild(contentTableFrame)
-	
-	local tableCols = {  {	["name"] = "Character",
+	_tableColumns = {  {	["name"] = "Character",
 					["width"] = 100,
 					["align"] = "LEFT",
 					["color"] = { 
@@ -856,21 +880,173 @@ function SetupMainWindow()
 					["DoCellUpdate"] = nil,
 				}}
 				
-	_contentFrameTable = ScrollingTable:CreateST(tableCols, 20, nil, nil, contentTableFrame.frame);
+	_optionFrame = AceGUI:Create("SimpleGroup")
+	-- _optionFrame:SetFullWidth(true)
+	-- _optionFrame:SetFullHeight(true)
+	_optionFrame:SetWidth(100)
+	_optionFrame:SetHeight(100)
+	_optionFrame:SetLayout("Fill")
+	
+	local scroll = AceGUI:Create("ScrollFrame")
+	scroll:SetFullWidth(true)	
+	scroll:SetFullHeight(true)
+	scroll:SetLayout("Fill")
+
+	local cbGroup = AceGUI:Create("SimpleGroup")
+	cbGroup:SetLayout("Flow")
+	
+	-- sort by name
+	for k, v in spairs(comrade_Config.Characters, function(t,a,b) return t[b].Name > t[a].Name end) do	
+		local cb = AceGUI:Create("CheckBox")
+		cb:SetLabel(k)		
+		cbGroup:AddChild(cb)		
+	end
+	
+	scroll:AddChild(cbGroup)
+	_optionFrame:AddChild(scroll)
+	_frame:AddChild(_optionFrame)
+	
+	_treeFrame = AceGUI:Create("TreeGroup")
+	_treeFrame:SetTree(_tree)
+	_treeFrame:SetLayout("Fill")
+	_treeFrame:SetFullWidth(true)
+	_treeFrame:SetFullHeight(true)
+	_treeFrame:SetAutoAdjustHeight(false)
+	_frame:AddChild(_treeFrame)
+	
+	_treeFrame:SetCallback("OnGroupSelected", function(container, event, group)
+		local st, le = string.find(group, "\001")
+		comrade_Config.selectedTreeValue = group
+		
+		if st ~= nil then -- not a group
+			local g = string.sub(group, st+1)
+			if g ~= "" then
+				SpellSelected(g)
+			end
+		end
+	end)
+
+	_contentFrame = AceGUI:Create("SimpleGroup")
+	_contentFrame:SetFullWidth(true)
+	_contentFrame:SetFullHeight(true)
+	_contentFrame:SetLayout("Flow")
+			
+	_contentHeaderFrame = AceGUI:Create("SimpleGroup")
+	_contentHeaderFrame:SetFullWidth(true)
+	_contentHeaderFrame:SetLayout("Flow")
+	_contentFrame:AddChild(_contentHeaderFrame)
+	
+	local contentTableFrame = AceGUI:Create("SimpleGroup")
+	contentTableFrame:SetFullWidth(true)
+	contentTableFrame:SetFullHeight(true)
+	contentTableFrame:SetLayout("Flow")
+	_contentFrame:AddChild(contentTableFrame)
+	
+	_contentFrameTable = ScrollingTable:CreateST(_tableColumns, 20, nil, nil, contentTableFrame.frame);
 	_contentFrameTable.frame:SetPoint("TOPLEFT", 0, -50)
 	_contentFrameTable.frame:SetPoint("BOTTOM", 0, 0)
-	--_contentFrameTable.frame:Hide()
+	
 	_treeFrame:AddChild(_contentFrame)
 	
-	if comrade_Config.options.selectedTreeValue and comrade_Config.options.selectedTreeValue ~= "" then
-		_treeFrame:SelectByValue(comrade_Config.options.selectedTreeValue)
+	if comrade_Config.selectedTreeValue and comrade_Config.selectedTreeValue ~= "" then
+		_treeFrame:SelectByValue(comrade_Config.selectedTreeValue)
 	end
 	
 	_frameCreated = true
+	
+	ChangeFrames()
+end
+
+function ChangeFrames()
+	--_frame:ReleaseChildren()
+	
+	if _cooldownFrameSelected then
+		_cooldownFrameSelected = false
+		_G["ToggleButton"]:SetText("Cooldowns")
+		
+		_optionFrame.frame:Hide()
+		_treeFrame.frame:Show()
+		
+		--_contentFrameTable.frame:Hide()
+		
+		-- _optionFrame = AceGUI:Create("InlineGroup")
+		-- _optionFrame:SetFullWidth(true)
+		-- _optionFrame:SetFullHeight(true)
+		-- _optionFrame:SetLayout("Fill")
+		
+		-- local scroll = AceGUI:Create("ScrollFrame")
+		-- scroll:SetFullWidth(true)	
+		-- scroll:SetFullHeight(true)
+		-- scroll:SetLayout("Flow")	
+
+		-- local cbGroup = AceGUI:Create("SimpleGroup")
+
+		-- -- sort by name
+		-- for k, v in spairs(comrade_Config.Characters, function(t,a,b) return t[b].Name > t[a].Name end) do	
+			-- local cb = AceGUI:Create("CheckBox")
+			-- cb:SetLabel(k)		
+			-- cbGroup:AddChild(cb)		
+		-- end
+		
+		-- scroll:AddChild(cbGroup)
+		-- _optionFrame:AddChild(scroll)
+		-- _frame:AddChild(_optionFrame)		
+	else
+		_cooldownFrameSelected = true
+		_G["ToggleButton"]:SetText("Options")
+		
+		_treeFrame.frame:Hide()
+		_optionFrame.frame:Show()		
+		
+		-- _treeFrame = AceGUI:Create("TreeGroup")
+		-- _treeFrame:SetTree(_tree)
+		-- _treeFrame:SetLayout("Fill")
+		-- _treeFrame:SetFullWidth(true)
+		-- _treeFrame:SetFullHeight(true)
+		-- _treeFrame:SetAutoAdjustHeight(false)
+		-- _frame:AddChild(_treeFrame)
+		
+		-- _treeFrame:SetCallback("OnGroupSelected", function(container, event, group)
+			-- local st, le = string.find(group, "\001")
+			-- comrade_Config.selectedTreeValue = group
+			
+			-- if st ~= nil then -- not a group
+				-- local g = string.sub(group, st+1)
+				-- if g ~= "" then
+					-- SpellSelected(g)
+				-- end
+			-- end
+		-- end)
+				
+		-- _contentFrame = AceGUI:Create("SimpleGroup")
+		-- _contentFrame:SetFullWidth(true)
+		-- _contentFrame:SetFullHeight(true)
+		-- _contentFrame:SetLayout("Flow")
+				
+		-- _contentHeaderFrame = AceGUI:Create("SimpleGroup")
+		-- _contentHeaderFrame:SetFullWidth(true)
+		-- _contentHeaderFrame:SetLayout("Flow")
+		-- _contentFrame:AddChild(_contentHeaderFrame)
+		
+		-- local contentTableFrame = AceGUI:Create("SimpleGroup")
+		-- contentTableFrame:SetFullWidth(true)
+		-- contentTableFrame:SetFullHeight(true)
+		-- contentTableFrame:SetLayout("Flow")
+		-- _contentFrame:AddChild(contentTableFrame)
+		
+		-- -- _contentFrameTable = ScrollingTable:CreateST(_tableColumns, 20, nil, nil, contentTableFrame.frame);
+		-- -- _contentFrameTable.frame:SetPoint("TOPLEFT", 0, -50)
+		-- -- _contentFrameTable.frame:SetPoint("BOTTOM", 0, 0)
+		-- _treeFrame:AddChild(_contentFrame)
+		
+		-- if comrade_Config.selectedTreeValue and comrade_Config.selectedTreeValue ~= "" then
+			-- _treeFrame:SelectByValue(comrade_Config.selectedTreeValue)
+		-- end		
+	end
 end
 
 function SpellSelected(spellId)
-	comrade_Config.options.selectedSpellId = spellId
+	comrade_Config.selectedSpellId = spellId
 	
 	UpdateContentFrame()
 end
@@ -883,12 +1059,12 @@ function UpdateContentFrame()
 	end
 
 	-- Only update the frame if there are characters and a spell is selected
-	if count > 0 and comrade_Config.options.selectedSpellId ~= "" then
+	if count > 0 and comrade_Config.selectedSpellId ~= "" then
 		_contentHeaderFrame:ReleaseChildren()
 		
 		local label = AceGUI:Create("Label")		
-		label:SetText(tradeSkillSpellData[comrade_Config.options.selectedSpellId].Name)
-		label:SetImage(tradeSkillSpellData[comrade_Config.options.selectedSpellId].Icon)
+		label:SetText(tradeSkillSpellData[comrade_Config.selectedSpellId].Name)
+		label:SetImage(tradeSkillSpellData[comrade_Config.selectedSpellId].Icon)
 		label:SetFont(GameFontHighlightSmall:GetFont(), 20)
 		label:SetImageSize(24,24)
 		label:SetRelativeWidth(0.9)
@@ -902,8 +1078,8 @@ function UpdateTableData()
 	local data = {}
 		
 	for k, v in pairs(comrade_Config.Characters) do	
-		if v.Spells[comrade_Config.options.selectedSpellId] and v.Spells[comrade_Config.options.selectedSpellId].hasRecipe then
-			table.insert(data, CreateDataRow(v, comrade_Config.options.selectedSpellId))
+		if v.Spells[comrade_Config.selectedSpellId] and v.Spells[comrade_Config.selectedSpellId].hasRecipe then
+			table.insert(data, CreateDataRow(v, comrade_Config.selectedSpellId))
 		end
 	end
 	
